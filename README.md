@@ -31,3 +31,4 @@ All forensic data is stored in the user-specified directory and is never committ
 
 ## License
 MIT License
+# Updated
