@@ -1,0 +1,16 @@
+*.db
+*.json
+*.log
+*.tmp
+*.pyc
+__pycache__/
+*.swp
+*.swo
+snapshot_*.json
+forensic_report.json
+forensic_logs.db
+*.tar.gz
+extract_analysis.sh
+view_data.sh
+secure_cleanup.sh
+archived_data/
