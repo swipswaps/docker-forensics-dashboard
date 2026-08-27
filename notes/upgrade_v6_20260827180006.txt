@@ -1,0 +1,33 @@
+=== upgrade_to_v6_guarded.sh — 20260827180006 UTC ===
+repo: swipswaps/docker-forensics-dashboard
+creating /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v6.py ...
+created /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v6.py
+py_compile: OK
+
+--- STOPPING V5, UPGRADING TO V6 ---
+Removed '/etc/systemd/system/multi-user.target.wants/forensic-backend-v5.service'.
+cp: cannot stat '/tmp/forensic-backend-v6.service': No such file or directory
+Created symlink '/etc/systemd/system/multi-user.target.wants/forensic-backend-v6.service' → '/etc/systemd/system/forensic-backend-v6.service'.
+active
+Aug 27 14:00:15 fedora systemd[1]: Started forensic-backend-v6.service - Forensic Backend v5 (supervised).
+Aug 27 14:00:16 fedora python3[2021308]: [2026-08-27T18:00:16.289128+00:00] [SUCCESS] init_db: /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/notes/forensic_logs.db
+Aug 27 14:00:16 fedora python3[2021308]: [2026-08-27T18:00:16.326219+00:00] [SUCCESS] startup: binding 0.0.0.0:3001 pid=2021308
+Aug 27 14:00:16 fedora python3[2021308]: INFO:     Started server process [2021308]
+Aug 27 14:00:16 fedora python3[2021308]: INFO:     Waiting for application startup.
+Aug 27 14:00:16 fedora python3[2021308]: INFO:     Application startup complete.
+Aug 27 14:00:16 fedora python3[2021308]: INFO:     Uvicorn running on http://0.0.0.0:3001 (Press CTRL+C to quit)
+
+--- HARD GATE (v6) ---
+health HTTP: 200
+{"script":"forensic_backend_v5.py","started_at":"2026-08-27T18:00:16.288153+00:00","pid":2021308,"uid":1000,"docker":{"ok":true,"server_version":"29.6.0","error":null},"collector":{"rows_this_process":3,"last_ok":"2026-08-27T18:00:26.851511+00:00","last_error":null,"interval_s":5},"docker_last_error":null,"memory_definition":"used = MemTotal - MemAvailable","coverage":{"points":1392,"first_ts":"20
+discovery directories: 0
+discovery: FAIL (0 directories)
+processes available: True
+safe-discovery directories: 0
+
+=== UPGRADE: FAIL — rolling back to v5 ===
+Removed '/etc/systemd/system/multi-user.target.wants/forensic-backend-v6.service'.
+Created symlink '/etc/systemd/system/multi-user.target.wants/forensic-backend-v5.service' → '/etc/systemd/system/forensic-backend-v5.service'.
+rollback: re-enabled v5
+
+=== END UPGRADE (ok=false) ===
