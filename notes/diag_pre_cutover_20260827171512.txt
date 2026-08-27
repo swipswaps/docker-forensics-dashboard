@@ -1,0 +1,51 @@
+=== diag_pre_cutover.sh — 20260827171512 UTC ===
+repo: swipswaps/docker-forensics-dashboard
+
+--- 2a. systemd unit for forensic-host-api ---
+inactive
+enabled
+User=root
+WorkingDirectory=/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo
+ExecStart=/usr/bin/python3 /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/host_api_proxy.py
+Restart=always
+
+--- 2b. Vite proxy: is the :3001 premise even true? ---
+container:/app/vite.config.js:
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    strictPort: true, // Force Vite to use port 3000 or crash
+    proxy: {
+      '/api': {
+        target: 'http://172.17.0.1:3001',
+        changeOrigin: true
+      }
+    }
+  }
+})container:/app/vite.config.ts:
+cat: can't open '/app/vite.config.ts': No such file or directory
+container:/app/vite.config.mjs:
+cat: can't open '/app/vite.config.mjs': No such file or directory
+API base in the running App.jsx:
+173:        { name: 'bridge', ip: '172.17.0.2', gateway: '172.17.0.1' },
+
+--- 2c. addLogEntry: defined, or only called? ---
+11:  const [actionLog, setActionLog] = useState([])
+35:  const addLogEntry = (message, type, details) => {
+occurrences in source: 7
+35:  const addLogEntry = (message, type, details) => {
+
+--- 2d. why repo-setup-api is Exited(1) ---
+2026-08-26T23:37:53.466814929Z INFO:     Started server process [1]
+2026-08-26T23:37:53.466911196Z INFO:     Waiting for application startup.
+2026-08-26T23:37:53.467485019Z INFO:     Application startup complete.
+2026-08-26T23:37:53.523487759Z ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 3001): address already in use
+2026-08-26T23:37:53.523541349Z INFO:     Waiting for application shutdown.
+2026-08-26T23:37:53.523850572Z INFO:     Application shutdown complete.
+
+=== END DIAGNOSTIC ===
