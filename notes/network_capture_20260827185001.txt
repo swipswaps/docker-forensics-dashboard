@@ -1,0 +1,6 @@
+
+=== NETWORK CAPTURE SUMMARY ===
+Check /tmp/network_capture.json for full data
+Check /tmp/dashboard_network.png for screenshot
+
+=== END ===
