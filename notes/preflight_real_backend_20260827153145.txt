@@ -1,0 +1,54 @@
+=== preflight_check_real_backend.sh — 20260827153145 UTC ===
+
+=== CHECK 1: docker ps output shape (NDJSON vs JSON array) ===
+raw first 3 lines:
+{"Command":"\"docker-entrypoint.s…\"","CreatedAt":"2026-08-26 20:11:20 -0400 EDT","HealthStatus":"none","ID":"5ecbf5b801b5","Image":"notes-forensic-dashboard:latest","Labels":"com.docker.compose.project=notes,com.docker.compose.service=forensic-dashboard,com.docker.compose.version=5.1.4","LocalVolumes":"0","Mounts":"","Names":"notes-forensic-dashboard-1","Networks":"bridge","Platform":{"architecture":"amd64","os":"linux"},"Ports":"0.0.0.0:3000-\u003e3000/tcp, [::]:3000-\u003e3000/tcp","RunningFor":"15 hours ago","Size":"25.6MB (virtual 333MB)","State":"running","Status":"Up About an hour"}
+{"Command":"\"uvicorn main:app --…\"","CreatedAt":"2026-08-26 19:37:39 -0400 EDT","HealthStatus":"none","ID":"af653e721006","Image":"backend-recovery-backend:latest","Labels":"com.docker.compose.project=backend,com.docker.compose.service=recovery-backend,com.docker.compose.version=5.1.4","LocalVolumes":"0","Mounts":"/var/lib/docker,/var/run/docke…","Names":"repo-setup-api","Networks":"host","Platform":{"architecture":"amd64","os":"linux"},"Ports":"","RunningFor":"16 hours ago","Size":"205kB (virtual 252MB)","State":"exited","Status":"Exited (1) 16 hours ago"}
+{"Command":"\"/docker-entrypoint.…\"","CreatedAt":"2026-08-24 10:05:40 -0400 EDT","HealthStatus":"none","ID":"c9d88a6b20ae","Image":"nginx:alpine","Labels":"com.docker.compose.config-hash=1addd1532f060c09fd284f047d7cea1fc5710534cdd356c7e8d62382e0f11437,com.docker.compose.container-number=1,com.docker.compose.depends_on=api:service_started:false,com.docker.compose.image=sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=/home/owner/Documents/101710cd-1ce8-4949-972f-822ced33d6d3/repo/repo-setup-site/docker-compose.yml,com.docker.compose.project.working_dir=/home/owner/Documents/101710cd-1ce8-4949-972f-822ced33d6d3/repo/repo-setup-site,com.docker.compose.project=repo-setup-site,com.docker.compose.service=nginx,com.docker.compose.version=5.1.4,maintainer=NGINX Docker Maintainers \u003cdocker-maint@nginx.com\u003e","LocalVolumes":"0","Mounts":"/home/owner/Do…","Names":"repo-setup-nginx","Networks":"repo-setup-site_repo-network","Platform":{"architecture":"amd64","os":"linux"},"Ports":"0.0.0.0:80-\u003e80/tcp, [::]:80-\u003e80/tcp","RunningFor":"3 days ago","Size":"8.19kB (virtual 68.3MB)","State":"running","Status":"Up 2 days"}
+line count: 6
+VERDICT: json.loads(raw) FAILS -> JSONDecodeError: Extra data: line 2 column 1 (char 597)
+         -> /api/forensic-data and /api/docker/* return HTTP 500
+parsed per-line: 6 object(s)
+[2026-08-27T15:32:46Z] [SUCCESS] check_docker_format: raw output captured
+
+=== CHECK 2: sqlite DB dir + ownership ===
+DB dir exists: /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/notes
+total 920
+drwxr-xr-x. 1 owner owner   2572 Aug 27 11:25 .
+drwxr-xr-x. 1 owner owner     18 Aug 26 12:06 ..
+-rw-r--r--. 1 owner owner  14290 Aug 26 12:05 00bfdfea-497d-499d-a5a3-84a711c230e6_0001.txt
+-rw-r--r--. 1 owner owner   4904 Aug 27 09:29 00bfdfea-497d-499d-a5a3-84a711c230e6_0102.txt
+db owner=owner group=owner mode=644 size=159744
+[2026-08-27T15:32:46Z] [SUCCESS] check_db_dir: /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/notes present
+
+=== CHECK 3: fastapi/uvicorn importable as root vs as user ===
+as user (owner):
+  OK 0.136.1 0.46.0
+as root (sudo):
+  OK 0.136.1 0.46.0
+user  python3: /usr/bin/python3
+root  python3: /usr/sbin/python3
+
+=== CHECK 4: port 3001 listeners ===
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                                   
+LISTEN 0      2048         0.0.0.0:3001       0.0.0.0:*    users:(("python3",pid=1853093,fd=6))     
+
+forensic-host-api unit state:
+active
+enabled
+
+=== CHECK 5: patch_frontend.py anchor match counts ===
+  Bulk Actions h2          count=1  OK
+  selectedView useState    count=1  OK
+  setShowConfirmDialog     count=3  3 MATCHES — replace() hits all of them
+  logs view guard          count=1  OK
+  safeData literal         count=0  ZERO MATCH — replace() is a silent no-op
+  addLogEntry defined      count=7  7 MATCHES — replace() hits all of them
+  axios imported           count=1  OK
+
+=== CHECK 6: frontend container serve mode ===
+id=5ecbf5b801b5 image=notes-forensic-dashboard:latest cmd="docker-entrypoint.s…" status=Up About an hour
+entrypoint/cmd:
+["npm","run","dev"] ["docker-entrypoint.sh"]
+
+=== END PREFLIGHT ===
