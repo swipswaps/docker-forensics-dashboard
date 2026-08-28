@@ -14,3 +14,4 @@ extract_analysis.sh
 view_data.sh
 secure_cleanup.sh
 archived_data/
+!rule_compliance.db

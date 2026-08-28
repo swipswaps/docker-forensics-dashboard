@@ -1,0 +1,301 @@
+=== collector_probe.sh -- 20260828134642 UTC ===
+project_root : /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo
+owner_repo   : swipswaps/docker-forensics-dashboard
+branch       : main
+db_path      : ../notes/forensic_logs.db
+dry_run      : false
+docker_cli   : true
+
+=== STEP 1: LIVE SCHEMA (Rule #17) ===
+--- index: idx_metrics_ts
+CREATE INDEX idx_metrics_ts ON system_metrics(timestamp)
+--- index: sqlite_autoindex_action_events_1
+--- table: action_events
+CREATE TABLE action_events (
+        id TEXT PRIMARY KEY,
+        timestamp TEXT NOT NULL,
+        action_type TEXT,
+        target_type TEXT,
+        target_id TEXT,
+        actor TEXT,
+        status TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        duration_ms INTEGER,
+        exit_code INTEGER,
+        request_json TEXT,
+        result_json TEXT,
+        stdout TEXT,
+        stderr TEXT,
+        error TEXT,
+        correlation_id TEXT,
+        before_state TEXT,
+        after_state TEXT
+    )
+    rows: 0
+--- table: docker_containers
+CREATE TABLE docker_containers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            container_id TEXT,
+            name TEXT,
+            image TEXT,
+            status TEXT,
+            cpu REAL,
+            memory REAL
+        )
+    rows: 39
+--- table: process_snapshots
+CREATE TABLE process_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            pid INTEGER,
+            name TEXT,
+            cpu REAL,
+            memory REAL,
+            cmdline TEXT
+        )
+    rows: 823
+--- table: sqlite_sequence
+CREATE TABLE sqlite_sequence(name,seq)
+    rows: 3
+--- table: system_metrics
+CREATE TABLE system_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            load_avg_1m REAL,
+            load_avg_5m REAL,
+            load_avg_15m REAL,
+            memory_total INTEGER,
+            memory_used INTEGER,
+            memory_free INTEGER
+        )
+    rows: 14892
+
+=== STEP 2: COLLECTOR LIVENESS DIVERGENCE (Rule #14) ===
+table                     rows  cycles  last_timestamp                        age_h
+system_metrics           14892   14892  2026-08-28T13:46:40.429663+00:00       0.00
+process_snapshots          823       3  2026-08-26T12:15:18.914038            49.52  <-- NAIVE ts (Rule #41)  <-- STALE >1h
+docker_containers           39       3  2026-08-26T12:15:18.914038            49.52  <-- NAIVE ts (Rule #41)  <-- STALE >1h
+action_events                0       0  (never written)                         N/A  <-- NEVER WRITTEN
+
+--- timestamp encoding split (Rule #41) ---
+system_metrics         aware=14889   naive=3       total=14892  <-- MIXED ENCODING: lexicographic ORDER BY is unsafe
+process_snapshots      aware=0       naive=823     total=823
+docker_containers      aware=0       naive=39      total=39
+
+=== STEP 3 / PROBE 1: DOCKER CLIENT REPRODUCTION (H2, Rule #14) ===
+SKIP: python 'docker' package not importable in this interpreter
+      -> the collector cannot be using docker-py from THIS python.
+      -> if the backend runs in a container, rerun PROBE 1 inside it:
+         docker exec -it <backend> python3 -c "import docker;print(docker.from_env().containers.list())"
+
+=== STEP 4 / PROBE 2: PSUTIL ENUMERATION REPRODUCTION ===
+PASS: psutil.process_iter enumerated 278 processes
+    {'memory_percent': 9.511618866533595, 'name': 'firefox', 'cpu_percent': 0.0, 'pid': 37349}
+    {'memory_percent': 7.317828083341895, 'name': 'Isolated Web Co', 'cpu_percent': 0.0, 'pid': 1987010}
+    {'memory_percent': 4.339912355792245, 'name': 'Isolated Web Co', 'cpu_percent': 0.0, 'pid': 2743920}
+    {'memory_percent': 3.8814822573183987, 'name': 'Isolated Web Co', 'cpu_percent': 0.0, 'pid': 67967}
+    {'memory_percent': 3.2313010807482856, 'name': 'Isolated Web Co', 'cpu_percent': 0.0, 'pid': 1860363}
+
+=== STEP 5 / PROBE 3: GUARDED WRITE TEST ON A COPY (Rule #9, #56) ===
+copy under test: /tmp/probe3_x7kypn90/copy.db
+process_snapshots: columns=['id', 'timestamp', 'pid', 'name', 'cpu', 'memory', 'cmdline']
+    FAIL: INSERT raised --
+Traceback (most recent call last):
+  File "<stdin>", line 36, in <module>
+sqlite3.IntegrityError: datatype mismatch
+docker_containers: columns=['id', 'timestamp', 'container_id', 'name', 'image', 'status', 'cpu', 'memory']
+    FAIL: INSERT raised --
+Traceback (most recent call last):
+  File "<stdin>", line 36, in <module>
+sqlite3.IntegrityError: datatype mismatch
+action_events: columns=['id', 'timestamp', 'action_type', 'target_type', 'target_id', 'actor', 'status', 'started_at', 'finished_at', 'duration_ms', 'exit_code', 'request_json', 'result_json', 'stdout', 'stderr', 'error', 'correlation_id', 'before_state', 'after_state']
+    PASS: insert + read-back OK (0 -> 1)
+          -> the DB layer is NOT the blocker; the collector never called INSERT.
+copy discarded by the OS on reboot; live database untouched
+
+=== STEP 6 / PROBE 4: BACKEND API RESPONSES (decides the 0124/0125 premise) ===
+--- http://127.0.0.1:8000/api/docker/containers -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:8080/api/docker/containers -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:5000/api/docker/containers -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:3000/api/docker/containers -> HTTP 200 (3178 bytes)
+{"available":true,"parse_errors":[],"error":null,"containers":[{"id":"5ecbf5b801b5","name":"notes-forensic-dashboard-1","image":"notes-forensic-dashboard:latest","state":"running","status":"Up 23 hours","exit_code":null,"health":"none","ports":"0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp","networks":"bridge","created_at":"2026-08-26 20:11:20 -0400 EDT","running_for":"38 hours ago","size":"25.6MB (
+--- http://127.0.0.1:8000/api/history/processes -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:8080/api/history/processes -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:5000/api/history/processes -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:3000/api/history/processes -> HTTP 200 (44113 bytes)
+{"available":true,"total_rows":823,"first_ts":"2026-08-26T12:14:52.009612","last_ts":"2026-08-26T12:15:18.914038","rows":[{"timestamp":"2026-08-26T12:15:18.914038","pid":964706,"name":"ps aux","cpu":0.0,"memory":0.0,"cmdline":"ps aux"},{"timestamp":"2026-08-26T12:15:18.914038","pid":964594,"name":"/sbin/agetty --noreset --noclear --issue-file=/etc/issue:/etc/issue.d:/run/issue.d:/usr/lib/issue.d -
+--- http://127.0.0.1:8000/api/forensic-data -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:8080/api/forensic-data -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:5000/api/forensic-data -> UNREACHABLE (curl rc=7 http=000)
+--- http://127.0.0.1:3000/api/forensic-data -> HTTP 200 (56070 bytes)
+{"system_load":[{"timestamp":"2026-08-28T13:25:39.954649+00:00","load_1m":0.1396484375,"load_5m":0.2119140625,"load_15m":0.28564453125},{"timestamp":"2026-08-28T13:25:45.234670+00:00","load_1m":0.12841796875,"load_5m":0.2080078125,"load_15m":0.28369140625},{"timestamp":"2026-08-28T13:25:50.470705+00:00","load_1m":0.11767578125,"load_5m":0.2041015625,"load_15m":0.28173828125},{"timestamp":"2026-08-
+
+=== STEP 7: RUNNING PROCESSES AND SOCKETS (H3, Rule #1) ===
+2027468    19:38:32 30836 /usr/bin/python3 /home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v5.py --port 3001 --host 0.0.0.0
+   4082  2-23:44:10 22992 /usr/bin/python3 -Es /usr/bin/seapplet
+  51931  2-22:23:06 13480 /usr/bin/python3 /usr/bin/wsdd --no-host --discovery --listen /run/user/1000/gvfsd/wsdd
+--- listening sockets
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                              
+LISTEN 0      4096         0.0.0.0:11434      0.0.0.0:*                                        
+LISTEN 0      4096         0.0.0.0:6379       0.0.0.0:*                                        
+LISTEN 0      4096       127.0.0.1:631        0.0.0.0:*                                        
+LISTEN 0      4096         0.0.0.0:3000       0.0.0.0:*                                        
+LISTEN 0      2048         0.0.0.0:3001       0.0.0.0:*    users:(("python3",pid=2027468,fd=6))
+LISTEN 0      4096         0.0.0.0:5432       0.0.0.0:*                                        
+LISTEN 0      4096         0.0.0.0:80         0.0.0.0:*                                        
+LISTEN 0      128          0.0.0.0:22         0.0.0.0:*                                        
+LISTEN 0      4096            [::]:11434         [::]:*                                        
+LISTEN 0      4096            [::]:6379          [::]:*                                        
+LISTEN 0      4096            [::]:3000          [::]:*                                        
+LISTEN 0      4096            [::]:5432          [::]:*                                        
+LISTEN 0      4096            [::]:80            [::]:*                                        
+LISTEN 0      128             [::]:22            [::]:*                                        
+LISTEN 0      4096           [::1]:631           [::]:*                                        
+--- docker container inventory and socket bind-mounts (H2)
+notes-forensic-dashboard-1	Up 23 hours	notes-forensic-dashboard:latest
+repo-setup-api	Exited (1) 38 hours ago	backend-recovery-backend:latest
+repo-setup-nginx	Up 3 days	nginx:alpine
+repo-setup-db	Up 3 days (healthy)	postgres:16-alpine
+repo-setup-redis	Up 3 days (healthy)	redis:7-alpine
+repo-setup-ollama	Up 3 days	ollama/ollama:latest
+docker ps exit code: 0
+notes-forensic-dashboard-1               (no mounts)
+repo-setup-nginx                         /home/owner/Documents/101710cd-1ce8-4949-972f-822ced33d6d3/repo/repo-setup-site/nginx.conf->/etc/nginx/nginx.conf 
+repo-setup-db                            /var/lib/docker/volumes/repo-setup-site_postgres_data/_data->/var/lib/postgresql/data 
+repo-setup-redis                         /var/lib/docker/volumes/repo-setup-site_redis_data/_data->/data 
+repo-setup-ollama                        /var/lib/docker/volumes/repo-setup-site_ollama_data/_data->/root/.ollama 
+===== docker logs --tail 60 notes-forensic-dashboard-1 =====
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.17.0.2:3000/
+12:23:43 PM [vite] page reload dist/index.html
+12:26:31 PM [vite] hmr update /src/App.jsx
+
+> forensic-dashboard@1.0.0 dev
+> vite
+
+
+  VITE v4.5.14  ready in 350 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.17.0.2:3000/
+12:26:54 PM [vite] page reload dist/index.html
+12:29:06 PM [vite] hmr update /src/App.jsx
+
+> forensic-dashboard@1.0.0 dev
+> vite
+
+
+  VITE v4.5.14  ready in 451 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.17.0.2:3000/
+12:29:30 PM [vite] page reload dist/index.html
+12:30:23 PM [vite] hmr update /src/App.jsx
+
+> forensic-dashboard@1.0.0 dev
+> vite
+
+
+  VITE v4.5.14  ready in 369 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.17.0.2:3000/
+
+> forensic-dashboard@1.0.0 dev
+> vite
+
+
+  VITE v4.5.14  ready in 423 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.17.0.2:3000/
+12:48:50 PM [vite] http proxy error at /api/forensic-data:
+Error: connect ECONNREFUSED 172.17.0.1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)
+2:19:48 PM [vite] hmr update /src/App.jsx
+
+> forensic-dashboard@1.0.0 dev
+> vite
+
+
+  VITE v4.5.14  ready in 1382 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.17.0.2:3000/
+6:08:14 PM [vite] http proxy error at /api/forensic-data:
+Error: connect ECONNREFUSED 172.17.0.1:3001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)
+
+=== STEP 8: INSERT CALL SITES AND SWALLOWED EXCEPTIONS (H1, Rule #35) ===
+--- INSERT sites for system_metrics
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_investigation.py:186:        INSERT INTO system_metrics (timestamp, load_avg_1m, load_avg_5m, load_avg_15m, memory_total, memory_used, memory_free)
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/real_forensic_backend_v2.py:126:            c.execute("INSERT INTO system_metrics (timestamp, load_avg_1m, load_avg_5m, load_avg_15m, memory_used, memory_free, memory_total) VALUES (?, ?, ?, ?, ?, ?, ?)",
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v5.py:107:    conn.execute("INSERT INTO system_metrics (timestamp, load_avg_1m, load_avg_5m, load_avg_15m, memory_total, memory_used, memory_free) VALUES (?,?,?,?,?,?,?)",
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v6.py:138:    conn.execute("INSERT INTO system_metrics (timestamp, load_avg_1m, load_avg_5m, load_avg_15m, memory_total, memory_used, memory_free) VALUES (?,?,?,?,?,?,?)",
+--- INSERT sites for process_snapshots
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_investigation.py:176:            INSERT INTO process_snapshots (timestamp, pid, name, cpu, memory, cmdline)
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v6.py:149:            conn.execute("INSERT INTO process_snapshots (timestamp, pid, name, cpu, memory, cmdline) VALUES (?,?,?,?,?,?)",
+--- INSERT sites for docker_containers
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_investigation.py:181:            INSERT INTO docker_containers (timestamp, container_id, name, image, status, cpu, memory)
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v6.py:156:        conn.execute("INSERT INTO docker_containers (timestamp, container_id, name, image, status, cpu, memory) VALUES (?,?,?,?,?,?,?)",
+--- INSERT sites for action_events
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/real_forensic_backend_v2.py:363:    c.execute("""INSERT INTO action_events
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v5.py:303:    conn.execute("INSERT INTO action_events (id,timestamp,action_type,target_type,target_id,actor,status,started_at,finished_at,duration_ms,exit_code,request_json,result_json,stdout,stderr,error,correlation_id,before_state,after_state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_backend_v6.py:419:    conn.execute("INSERT INTO action_events (id,timestamp,action_type,target_type,target_id,actor,status,started_at,finished_at,duration_ms,exit_code,request_json,result_json,stdout,stderr,error,correlation_id,before_state,after_state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+--- bare except sites (an `except: pass` around the docker+process writes
+    explains this exact failure shape: one table keeps filling, two stop)
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/forensic_investigation.py-141-            pass
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/fix_and_push_repo.py-60-            continue
+/home/owner/Documents/00bfdfea-497d-499d-a5a3-84a711c230e6/repo/host_api_proxy_backup.py-227-            continue
+
+=== STEP 9: GIT PROVENANCE ===
+69fed94 cdp network capture fixed 20260827191549
+00ce6d6 cdp network capture 20260827191211
+41149be network capture 20260827185001
+0df62ea upgrade to v6 (ok=) 20260827180006
+1d2bf0a pre-cutover diagnostics (20260827171512)
+d538a36 pre-cutover diagnostics (20260827170555)
+a14553b evidence: preflight audit of real_forensic_backend.py (20260827153145)
+966069e Restore full forensic dashboard: all tabs working
+48d9a69 Restore full forensic dashboard: add all containers, directories, and real data
+482c3de Refresh README to clear GitHub cache
+e6a0d00 Update README to accurately reflect clean repository contents
+d6605ec Clean forensic tool
+--- working tree status (short)
+ M App.jsx
+ M host_api_proxy.py
+?? .collector_probe_stderr.2813522
+?? .collector_probe_stderr.2815451
+?? capture_cdp_network.sh
+?? capture_cdp_network_fixed.sh
+?? capture_network_with_playwright.sh
+?? collector_probe.sh
+?? cutover_v5_guarded.sh
+?? deploy_backend_v2.sh
+?? diag_pre_cutover.sh
+?? discover_all_docker_assets.py
+?? fix_frontend_api_calls.sh
+?? fix_frontend_complete.sh
+?? fix_frontend_targeted.sh
+?? forensic_backend_v5.py
+?? install_v2.sh
+?? "notes/Screenshot 2026-08-27 at 08-58-28 Forensic Dashboard.png"
+?? "notes/Screenshot 2026-08-27 at 10-18-08 Forensic Dashboard.png"
+?? "notes/Screenshot 2026-08-27 at 10-18-32 Forensic Dashboard.png"
+?? notes/collector_probe_20260828134642.txt
+?? notes/cutover_v5_20260827173550.txt
+?? patch_frontend.py
+?? patch_v6_with_playwright.sh
+?? preflight_check_real_backend.sh
+?? real_forensic_backend_v2.py
+?? restore_missing_containers.py
+?? safe_discover_tool.py
+?? safe_discover_tool_v2.py
+?? upgrade_to_v6_guarded.sh
+
+=== STEP 10: CAPTURED STDERR FROM ALL STEPS (Rule #8, conflict C1) ===
+    (no stderr produced)
+
+=== END DIAGNOSTIC ===
